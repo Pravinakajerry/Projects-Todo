@@ -316,7 +316,7 @@
             padding: 20px;
             width: 280px;
             z-index: 100;
-            display: none; /* Hidden by default, JS enables if needed */
+            display: none; 
             transition: opacity 0.3s ease, transform 0.3s ease;
         }
 
@@ -542,6 +542,10 @@
             display: block;
         }
 
+        .editor div {
+            margin-bottom: 4px;
+        }
+
         .editor input[type="checkbox"] {
             appearance: none;
             width: 16px;
@@ -592,17 +596,21 @@
     </div>
 
     <!-- Floating Add Column Button -->
-    <button class="add-column-btn" onclick="addNewColumn()" title="Add New Column">+</button>
+    <button class="add-column-btn" id="addColumnBtn" title="Add New Column">+</button>
 
     <!-- Onboarding Widget -->
     <div class="onboarding-widget" id="onboardingWidget">
         <div class="onboarding-header">
             <h3>Quick Start Guide</h3>
-            <button class="onboarding-close" onclick="dismissOnboarding()" title="Dismiss">×</button>
+            <button class="onboarding-close" id="dismissOnboardingBtn" title="Dismiss">×</button>
         </div>
         <div class="ob-step" id="obStepAdd">
             <div class="ob-checkbox"></div>
-            <span>Click the <strong>+</strong> button to add a new task card.</span>
+            <span>Click a <strong>+</strong> button to add a new task card.</span>
+        </div>
+        <div class="ob-step" id="obStepAddCol">
+            <div class="ob-checkbox"></div>
+            <span>Click the bottom right <strong>+</strong> to add a new column.</span>
         </div>
         <div class="ob-step" id="obStepEditCol">
             <div class="ob-checkbox"></div>
@@ -641,7 +649,7 @@
     <!-- Modal Overlay -->
     <div class="modal-overlay" id="modalOverlay">
         <div class="modal-content" id="modalContent">
-            <button class="close-btn" onclick="closeModal()">×</button>
+            <button class="close-btn" id="closeModalBtn">×</button>
             <div class="modal-header">
                 <div class="modal-header-top">
                     <div class="modal-project-name" id="modalProjectName">Project Name</div>
@@ -669,23 +677,41 @@
     </div>
 
     <script>
+        // --- Security Wrapper ---
+        // Prevents the app from crashing if local file policies block storage or commands
+        try { document.execCommand("defaultParagraphSeparator", false, "div"); } catch(e) {}
+
+        function safeGetStorage(key, defaultData) {
+            try {
+                const data = localStorage.getItem(key);
+                return data ? JSON.parse(data) : defaultData;
+            } catch (e) {
+                console.warn("Local storage access denied. Data will not save permanently on this file path.");
+                return defaultData;
+            }
+        }
+
+        function safeSetStorage(key, data) {
+            try { localStorage.setItem(key, JSON.stringify(data)); } catch (e) {}
+        }
+
         const DEFAULT_PAGE_TITLE = "Minimalist Project Manager";
 
-        // --- Data Management (Local Storage) ---
+        // --- Data Management ---
         const defaultData = [
             {
                 id: 'proj1',
                 name: 'Product Launch',
                 tasks: [
-                    { id: 't1', title: 'Write press release', content: 'Draft the main PR.', completed: false, color: 'default' },
-                    { id: 't2', title: 'Prepare assets', content: '<input type="checkbox"> High-res logo<br><input type="checkbox"> UI mockups', completed: false, color: 'red' }
+                    { id: 't1', title: 'Write press release', content: '<div>Draft the main PR.</div>', completed: false, color: 'default' },
+                    { id: 't2', title: 'Prepare assets', content: '<div><input type="checkbox"> &nbsp;High-res logo</div><div><input type="checkbox"> &nbsp;UI mockups</div>', completed: false, color: 'red' }
                 ]
             },
             {
                 id: 'proj2',
                 name: 'Marketing Site',
                 tasks: [
-                    { id: 't3', title: 'Update homepage copy', content: 'Focus on the new value proposition.', completed: false, color: 'orange' }
+                    { id: 't3', title: 'Update homepage copy', content: '<div>Focus on the new value proposition.</div>', completed: false, color: 'orange' }
                 ]
             },
             {
@@ -695,12 +721,12 @@
             }
         ];
 
-        let boardData = JSON.parse(localStorage.getItem('minTaskManagerData')) || defaultData;
+        let boardData = safeGetStorage('minTaskManagerData', defaultData);
         let currentEditingTask = null;
         let currentEditingProject = null;
 
         function saveData() {
-            localStorage.setItem('minTaskManagerData', JSON.stringify(boardData));
+            safeSetStorage('minTaskManagerData', boardData);
         }
 
         function generateId() {
@@ -708,25 +734,27 @@
         }
 
         // --- Onboarding Logic ---
-        let onboardingState = JSON.parse(localStorage.getItem('minTaskOnboarding')) || {
+        const defaultOnboardingState = {
             addedCard: false,
             editedCol: false,
             rightClicked: false,
+            addedCol: false,
             dismissed: false
         };
+        
+        let onboardingState = safeGetStorage('minTaskOnboarding', defaultOnboardingState);
 
         function renderOnboarding() {
             const widget = document.getElementById('onboardingWidget');
-            if (onboardingState.dismissed || (onboardingState.addedCard && onboardingState.editedCol && onboardingState.rightClicked)) {
+            if (onboardingState.dismissed || (onboardingState.addedCard && onboardingState.editedCol && onboardingState.rightClicked && onboardingState.addedCol)) {
                 widget.style.display = 'none';
-                // Mark dismissed so we don't keep evaluating logic if it's done
                 if (!onboardingState.dismissed) dismissOnboarding(); 
                 return;
             }
-            
             widget.style.display = 'block';
             
             if (onboardingState.addedCard) document.getElementById('obStepAdd').classList.add('done');
+            if (onboardingState.addedCol) document.getElementById('obStepAddCol').classList.add('done');
             if (onboardingState.editedCol) document.getElementById('obStepEditCol').classList.add('done');
             if (onboardingState.rightClicked) document.getElementById('obStepRightClick').classList.add('done');
         }
@@ -734,23 +762,21 @@
         function completeOnboardingStep(step) {
             if (onboardingState.dismissed || onboardingState[step]) return;
             onboardingState[step] = true;
-            localStorage.setItem('minTaskOnboarding', JSON.stringify(onboardingState));
+            safeSetStorage('minTaskOnboarding', onboardingState);
             renderOnboarding();
             
-            // Auto close if all steps completed
-            if (onboardingState.addedCard && onboardingState.editedCol && onboardingState.rightClicked) {
+            if (onboardingState.addedCard && onboardingState.editedCol && onboardingState.rightClicked && onboardingState.addedCol) {
                 setTimeout(() => dismissOnboarding(), 1000);
             }
         }
 
         function dismissOnboarding() {
             onboardingState.dismissed = true;
-            localStorage.setItem('minTaskOnboarding', JSON.stringify(onboardingState));
+            safeSetStorage('minTaskOnboarding', onboardingState);
             const widget = document.getElementById('onboardingWidget');
             widget.style.opacity = '0';
             setTimeout(() => { widget.style.display = 'none'; }, 300);
         }
-
 
         function getSubtaskProgress(content) {
             if (!content) return null;
@@ -783,16 +809,28 @@
                 titleSpan.title = "Double-click to edit";
                 
                 titleSpan.ondblclick = function() {
-                    completeOnboardingStep('editedCol'); // Trigger onboarding step
+                    completeOnboardingStep('editedCol'); 
                     this.contentEditable = true;
                     this.focus();
                     document.execCommand('selectAll', false, null);
                 };
+                
                 titleSpan.onblur = function() {
                     this.contentEditable = false;
-                    project.name = this.textContent.trim() || 'Untitled';
+                    const newName = this.textContent.trim();
+                    
+                    if (newName === '' && project.tasks.length === 0) {
+                        boardData = boardData.filter(p => p.id !== project.id);
+                        saveData();
+                        renderBoard();
+                        return;
+                    }
+                    
+                    project.name = newName || 'Untitled';
                     saveData();
+                    this.textContent = project.name; 
                 };
+                
                 titleSpan.onkeydown = function(e) {
                     if (e.key === 'Enter') {
                         e.preventDefault();
@@ -809,14 +847,12 @@
                 header.appendChild(addBtn);
                 col.appendChild(header);
 
-                // Task List (Drop Zone)
                 const taskList = document.createElement('div');
                 taskList.className = 'task-list';
                 taskList.dataset.projectId = project.id;
 
                 project.tasks.forEach(task => {
                     const card = document.createElement('div');
-                    // Add background color AND completed fade classes
                     card.className = `task-card bg-${task.color || 'default'} ${task.completed ? 'is-completed' : ''}`;
                     card.draggable = true;
                     card.dataset.taskId = task.id; 
@@ -841,7 +877,7 @@
             });
         }
 
-        // --- Event Delegation (Handling all Clicks safely) ---
+        // --- Event Delegation ---
         let isDraggingCard = false;
 
         boardElement.addEventListener('click', (e) => {
@@ -863,7 +899,7 @@
             }
         });
 
-        // --- Context Menu Logic (Right Click) ---
+        // --- Context Menu Logic ---
         const contextMenu = document.getElementById('contextMenu');
         let contextTarget = { projectId: null, taskId: null };
 
@@ -872,7 +908,7 @@
             if (!card) return;
             
             e.preventDefault(); 
-            completeOnboardingStep('rightClicked'); // Trigger onboarding step
+            completeOnboardingStep('rightClicked'); 
 
             const taskList = card.closest('.task-list');
             contextTarget = {
@@ -897,7 +933,6 @@
             }
         });
 
-        // Handle Context Menu Item clicks
         contextMenu.addEventListener('click', (e) => {
             const item = e.target.closest('.context-item');
             if (!item) return;
@@ -988,10 +1023,18 @@
         // --- Features Logic ---
 
         function addNewColumn() {
-            boardData.push({ id: generateId(), name: 'New Project', tasks: [] });
+            completeOnboardingStep('addedCol');
+            boardData.push({ id: generateId(), name: '', tasks: [] });
             saveData();
             renderBoard();
-            setTimeout(() => window.scrollTo({ left: document.body.scrollWidth, behavior: 'smooth' }), 50);
+            setTimeout(() => {
+                window.scrollTo({ left: document.body.scrollWidth, behavior: 'smooth' });
+                const newColHeaders = document.querySelectorAll('.editable-title');
+                if(newColHeaders.length > 0) {
+                    const latest = newColHeaders[newColHeaders.length - 1];
+                    latest.ondblclick(); 
+                }
+            }, 50);
         }
 
         function toggleMainTask(projectId, taskId) {
@@ -1004,10 +1047,8 @@
             const task = project.tasks[taskIndex];
             task.completed = !task.completed;
             
-            // Remove from current position
             project.tasks.splice(taskIndex, 1);
             
-            // Push to bottom if completed, unshift to top if uncompleted
             if (task.completed) {
                 project.tasks.push(task);
             } else {
@@ -1026,12 +1067,17 @@
         const colorCircles = document.querySelectorAll('.color-circle');
         const modalDeleteBtn = document.getElementById('modalDeleteBtn');
 
+        // Static Button Listeners (replaces inline HTML onclicks)
+        document.getElementById('addColumnBtn').addEventListener('click', addNewColumn);
+        document.getElementById('closeModalBtn').addEventListener('click', closeModal);
+        document.getElementById('dismissOnboardingBtn').addEventListener('click', dismissOnboarding);
+
         function addNewTask(projectId) {
-            completeOnboardingStep('addedCard'); // Trigger onboarding step
+            completeOnboardingStep('addedCard'); 
             
             const project = boardData.find(p => p.id === projectId);
             const newTask = { id: generateId(), title: 'New Task', content: '', completed: false, color: 'default' };
-            project.tasks.unshift(newTask); // Adds at the top instead of bottom
+            project.tasks.unshift(newTask); 
             saveData();
             renderBoard();
             openModal(projectId, newTask.id);
@@ -1060,7 +1106,6 @@
             });
         });
 
-        // Delete from Modal
         modalDeleteBtn.addEventListener('click', () => {
             if (!currentEditingProject || !currentEditingTask) return;
             if (confirm("Are you sure you want to delete this task?")) {
@@ -1087,7 +1132,6 @@
             
             updateModalColorPicker(currentEditingTask.color || 'default');
             
-            // Update Page Title
             document.title = currentEditingTask.title || "Untitled Task";
 
             modalOverlay.classList.add('active');
@@ -1109,7 +1153,6 @@
             currentEditingTask = null;
             currentEditingProject = null;
             
-            // Revert Page Title
             document.title = DEFAULT_PAGE_TITLE;
         }
 
@@ -1117,8 +1160,7 @@
             if (e.target === modalOverlay) closeModal();
         });
 
-        // --- Keyboard Shortcuts & Live Page Title Updates ---
-
+        // --- Editor Keyboard Shortcuts ---
         modalTaskTitle.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' || e.key === 'Tab') {
                 e.preventDefault();
@@ -1144,18 +1186,17 @@
         modalTaskTitle.addEventListener('input', () => {
             if (currentEditingTask) {
                 currentEditingTask.title = modalTaskTitle.value;
-                document.title = modalTaskTitle.value || "Untitled Task"; // Live Title Update
+                document.title = modalTaskTitle.value || "Untitled Task"; 
             }
         });
 
-        // --- Subtask Checkbox Engine ---
         modalEditor.addEventListener('keyup', function(e) {
             if(currentEditingTask) currentEditingTask.content = modalEditor.innerHTML;
 
             if (e.key === ']') {
                 let text = this.innerHTML;
                 if (text.includes('[]') || text.includes('[ ]')) {
-                    const newHTML = text.replace(/\[\]|\[ \]/g, '<input type="checkbox"> ');
+                    const newHTML = text.replace(/\[\]|\[ \]/g, '<input type="checkbox">&nbsp;');
                     
                     if (this.innerHTML !== newHTML) {
                         this.innerHTML = newHTML;
@@ -1166,6 +1207,82 @@
                         range.collapse(false);
                         sel.removeAllRanges();
                         sel.addRange(range);
+                    }
+                }
+            }
+        });
+
+        modalEditor.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                const sel = window.getSelection();
+                if (!sel.rangeCount) return;
+
+                let currentNode = sel.getRangeAt(0).startContainer;
+                let parentBlock = currentNode;
+
+                while (parentBlock && parentBlock !== this && parentBlock.tagName !== 'DIV') {
+                    parentBlock = parentBlock.parentNode;
+                }
+
+                if (parentBlock && parentBlock !== this) {
+                    const checkbox = parentBlock.querySelector('input[type="checkbox"]');
+                    if (checkbox) {
+                        e.preventDefault(); 
+
+                        const textContent = parentBlock.textContent.replace(/\u00A0/g, '').trim();
+
+                        if (textContent === '') {
+                            parentBlock.innerHTML = '<br>';
+                            const newRange = document.createRange();
+                            newRange.selectNodeContents(parentBlock);
+                            newRange.collapse(false);
+                            sel.removeAllRanges();
+                            sel.addRange(newRange);
+                        } else {
+                            const newDiv = document.createElement('div');
+                            newDiv.innerHTML = '<input type="checkbox">&nbsp;'; 
+                            
+                            if (parentBlock.nextSibling) {
+                                this.insertBefore(newDiv, parentBlock.nextSibling);
+                            } else {
+                                this.appendChild(newDiv);
+                            }
+
+                            const newRange = document.createRange();
+                            newRange.setStart(newDiv.childNodes[1], 1); 
+                            newRange.collapse(true);
+                            sel.removeAllRanges();
+                            sel.addRange(newRange);
+                        }
+                        if(currentEditingTask) currentEditingTask.content = modalEditor.innerHTML;
+                        return; 
+                    }
+                }
+            }
+
+            if (e.key === 'Backspace') {
+                const sel = window.getSelection();
+                if (!sel.rangeCount) return;
+                const range = sel.getRangeAt(0);
+
+                if (range.startContainer.nodeType === Node.TEXT_NODE) {
+                    const textNode = range.startContainer;
+                    if (range.startOffset <= 1) { 
+                        const prev = textNode.previousSibling;
+                        if (prev && prev.tagName === 'INPUT' && prev.type === 'checkbox') {
+                            e.preventDefault();
+                            prev.remove();
+                            textNode.textContent = textNode.textContent.trimStart();
+                            if(currentEditingTask) currentEditingTask.content = modalEditor.innerHTML;
+                        }
+                    }
+                } else if (range.startContainer.tagName === 'DIV' || range.startContainer === this) {
+                    const offset = range.startOffset;
+                    const child = range.startContainer.childNodes[offset - 1];
+                    if (child && child.tagName === 'INPUT' && child.type === 'checkbox') {
+                        e.preventDefault();
+                        child.remove();
+                        if(currentEditingTask) currentEditingTask.content = modalEditor.innerHTML;
                     }
                 }
             }
